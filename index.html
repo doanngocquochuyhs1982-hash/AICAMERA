@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#020813">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="PRO AI Cam">
+  <meta name="description" content="Real-time AI object detection. 80 COCO classes. Powered by TensorFlow.js.">
+  <title>PRO AI Camera</title>
+
+  <!-- PWA Manifest (inline data URI avoids GitHub Pages path issues) -->
+  <link rel="manifest" href="manifest.json">
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+
+  <!-- TF.js CDN (defer so splash can show immediately) -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd" defer></script>
+
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () =>
+        navigator.serviceWorker.register('./sw.js').catch(() => {})
+      );
+    }
+  </script>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════
+  SPLASH SCREEN
+══════════════════════════════════════════════ -->
+<div class="splash" id="splash">
+  <canvas class="splash-particles" id="splashParticles"></canvas>
+  <div class="splash-body">
+    <div class="splash-logo">
+      <div class="splash-ring r1"></div>
+      <div class="splash-ring r2"></div>
+      <div class="splash-ring r3"></div>
+      <svg class="splash-icon" viewBox="0 0 48 48" fill="none">
+        <circle cx="24" cy="24" r="9" stroke="currentColor" stroke-width="1.8"/>
+        <line x1="24" y1="3"  x2="24" y2="13" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+        <line x1="24" y1="35" x2="24" y2="45" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+        <line x1="3"  y1="24" x2="13" y2="24" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+        <line x1="35" y1="24" x2="45" y2="24" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+        <line x1="8.8"  y1="8.8"  x2="15.5" y2="15.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+        <line x1="32.5" y1="32.5" x2="39.2" y2="39.2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+        <line x1="39.2" y1="8.8"  x2="32.5" y2="15.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+        <line x1="8.8"  y1="39.2" x2="15.5" y2="32.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+      </svg>
+    </div>
+    <h1 class="splash-title">PRO AI CAMERA</h1>
+    <p class="splash-sub">Neural Vision &middot; TensorFlow.js &middot; COCO-SSD</p>
+    <div class="splash-progress-track">
+      <div class="splash-progress-fill" id="splashFill"></div>
+    </div>
+    <p class="splash-status" id="splashStatus">Initializing…</p>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════
+  PWA INSTALL BANNER
+══════════════════════════════════════════════ -->
+<div class="install-banner hidden" id="installBanner">
+  <svg class="install-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+    <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/>
+  </svg>
+  <div class="install-text">
+    <strong>Install PRO AI Camera</strong>
+    <span>Works offline &bull; Full-screen experience</span>
+  </div>
+  <button class="install-cta" id="installBtn">Install</button>
+  <button class="install-dismiss" id="installClose" aria-label="Dismiss">
+    <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2.5" fill="none">
+      <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+    </svg>
+  </button>
+</div>
+
+<!-- ═══════════════════════════════════════════
+  TOAST NOTIFICATIONS
+══════════════════════════════════════════════ -->
+<div class="toast-stack" id="toastStack" aria-live="polite"></div>
+
+<!-- ═══════════════════════════════════════════
+  MAIN APPLICATION
+══════════════════════════════════════════════ -->
+<div class="app">
+
+  <!-- ─── HEADER ─── -->
+  <header class="header glass">
+    <div class="hdr-l">
+      <div class="status-dot" id="statusDot"></div>
+      <div>
+        <h1 class="hdr-title">PRO AI CAMERA</h1>
+        <p class="hdr-sub" id="aiStatus">Initializing…</p>
+      </div>
+    </div>
+    <div class="hdr-r">
+      <time class="clock" id="clock">00:00:00</time>
+      <button class="icon-btn" id="fullscreenBtn" title="Fullscreen" aria-label="Toggle fullscreen">
+        <svg id="fsEnterIcon" viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none">
+          <path d="M8 3H5a2 2 0 00-2 2v3m18 0V5a2 2 0 00-2-2h-3m0 18h3a2 2 0 002-2v-3M3 16v3a2 2 0 002 2h3"/>
+        </svg>
+        <svg id="fsExitIcon" class="hidden" viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none">
+          <path d="M8 3v3a2 2 0 01-2 2H3m18 0h-3a2 2 0 01-2-2V3m0 18v-3a2 2 0 012-2h3M3 16h3a2 2 0 012 2v3"/>
+        </svg>
+      </button>
+      <button class="icon-btn" id="themeBtn" title="Toggle theme" aria-label="Toggle theme">
+        <svg id="iconSun" viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none">
+          <circle cx="12" cy="12" r="5"/>
+          <line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/>
+          <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
+          <line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/>
+          <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+        </svg>
+        <svg id="iconMoon" class="hidden" viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none">
+          <path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/>
+        </svg>
+      </button>
+      <button class="icon-btn" id="settingsBtn" title="Settings" aria-label="Open settings">
+        <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none">
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/>
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- ─── STATS GRID ─── -->
+  <div class="stats-grid">
+    <div class="stat-card fps-card">
+      <div class="stat-ico-wrap">
+        <svg viewBox="0 0 20 20" width="11" height="11" fill="currentColor">
+          <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clip-rule="evenodd"/>
+        </svg>
+      </div>
+      <div class="stat-data">
+        <span class="stat-lbl">FPS</span>
+        <span class="stat-val" id="fpsDisplay">–</span>
+      </div>
+    </div>
+    <div class="stat-card obj-card">
+      <div class="stat-ico-wrap">
+        <svg viewBox="0 0 20 20" width="11" height="11" fill="currentColor">
+          <path d="M5 3a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2V5a2 2 0 00-2-2H5zm0 8a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2v-2a2 2 0 00-2-2H5zm8-8a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2V5a2 2 0 00-2-2h-2zm0 8a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2v-2a2 2 0 00-2-2h-2z"/>
+        </svg>
+      </div>
+      <div class="stat-data">
+        <span class="stat-lbl">LIVE</span>
+        <span class="stat-val" id="objectCount">–</span>
+      </div>
+    </div>
+    <div class="stat-card tot-card">
+      <div class="stat-ico-wrap">
+        <svg viewBox="0 0 20 20" width="11" height="11" fill="currentColor">
+          <path fill-rule="evenodd" d="M3 3a1 1 0 000 2v8a2 2 0 002 2h2.586l-1.293 1.293a1 1 0 101.414 1.414L10 15.414l2.293 2.293a1 1 0 001.414-1.414L12.414 15H15a2 2 0 002-2V5a1 1 0 100-2H3zm11 4a1 1 0 10-2 0v4a1 1 0 102 0V7zm-3 1a1 1 0 10-2 0v3a1 1 0 102 0V8zM8 9a1 1 0 00-2 0v2a1 1 0 102 0V9z" clip-rule="evenodd"/>
+        </svg>
+      </div>
+      <div class="stat-data">
+        <span class="stat-lbl">TOTAL</span>
+        <span class="stat-val" id="totalDetected">0</span>
+      </div>
+    </div>
+    <div class="stat-card time-card">
+      <div class="stat-ico-wrap">
+        <svg viewBox="0 0 20 20" width="11" height="11" fill="currentColor">
+          <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clip-rule="evenodd"/>
+        </svg>
+      </div>
+      <div class="stat-data">
+        <span class="stat-lbl">SESSION</span>
+        <span class="stat-val stat-mono" id="sessionTime">00:00</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─── CAMERA VIEWPORT ─── -->
+  <div class="viewport" id="viewport">
+    <!-- Decorative corners -->
+    <span class="vp-corner tl"></span>
+    <span class="vp-corner tr"></span>
+    <span class="vp-corner bl"></span>
+    <span class="vp-corner br"></span>
+
+    <!-- AI scan sweep -->
+    <div class="scan-line" id="scanLine"></div>
+
+    <!-- Camera loading -->
+    <div class="cam-overlay" id="camLoading">
+      <div class="cam-spinner"></div>
+      <p>Requesting camera…</p>
+    </div>
+
+    <video id="video" autoplay playsinline muted></video>
+    <canvas id="canvas"></canvas>
+
+    <!-- FPS sparkline (inside viewport) -->
+    <canvas class="fps-graph" id="fpsGraph" width="96" height="28"></canvas>
+
+    <!-- Badges -->
+    <div class="vp-badge live-badge hidden" id="liveBadge">
+      <span class="live-pulse"></span>LIVE
+    </div>
+    <div class="vp-badge conf-badge hidden" id="confBadge">≥55%</div>
+    <div class="vp-badge mode-badge hidden" id="modeBadge">⚡ FAST</div>
+  </div>
+
+  <!-- ─── OBJECT TYPE PILLS ─── -->
+  <div class="pills-panel glass" id="typePanel">
+    <span class="pills-empty">No objects detected</span>
+  </div>
+
+  <!-- ─── CONTROLS ─── -->
+  <div class="controls glass">
+    <!-- Row 1: Start / Stop -->
+    <div class="ctrl-row">
+      <button class="btn btn-start" id="startBtn">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+        Start Camera
+      </button>
+      <button class="btn btn-stop hidden" id="stopBtn">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="1.5"/></svg>
+        Stop
+      </button>
+    </div>
+
+    <!-- Row 2: AI toggle + Mode -->
+    <div class="ctrl-row ctrl-row-mid">
+      <label class="tog-wrap" title="Toggle AI detection">
+        <span class="tog-label">AI</span>
+        <input type="checkbox" id="aiToggle" checked disabled>
+        <span class="tog-track"><span class="tog-thumb"></span></span>
+      </label>
+      <div class="mode-group">
+        <button class="mode-btn active" id="fastBtn">⚡ Fast</button>
+        <button class="mode-btn" id="accurateBtn">🎯 Precise</button>
+      </div>
+    </div>
+
+    <!-- Row 3: Action icons (evenly distributed) -->
+    <div class="ctrl-row ctrl-row-actions">
+      <button class="action-btn" id="flipBtn" disabled title="Flip camera" aria-label="Flip camera">
+        <svg viewBox="0 0 24 24" width="15" height="15" stroke="currentColor" stroke-width="2" fill="none">
+          <path d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4"/>
+        </svg>
+        <span>Flip</span>
+      </button>
+      <button class="action-btn" id="snapBtn" disabled title="Take snapshot" aria-label="Snapshot">
+        <svg viewBox="0 0 24 24" width="15" height="15" stroke="currentColor" stroke-width="2" fill="none">
+          <path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/>
+          <circle cx="12" cy="13" r="4"/>
+        </svg>
+        <span>Snap</span>
+      </button>
+      <button class="action-btn" id="soundBtn" title="Sound alerts" aria-label="Toggle sound">
+        <svg id="soundIconOn" class="hidden" viewBox="0 0 24 24" width="15" height="15" stroke="currentColor" stroke-width="2" fill="none">
+          <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+          <path d="M15.54 8.46a5 5 0 010 7.07"/>
+          <path d="M19.07 4.93a10 10 0 010 14.14"/>
+        </svg>
+        <svg id="soundIconOff" viewBox="0 0 24 24" width="15" height="15" stroke="currentColor" stroke-width="2" fill="none">
+          <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+          <line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/>
+        </svg>
+        <span>Sound</span>
+      </button>
+      <button class="action-btn" id="galleryBtn" title="Gallery" aria-label="Open gallery">
+        <svg viewBox="0 0 24 24" width="15" height="15" stroke="currentColor" stroke-width="2" fill="none">
+          <rect x="3" y="3" width="18" height="18" rx="2"/>
+          <circle cx="8.5" cy="8.5" r="1.5"/>
+          <path d="M21 15l-5-5L5 21"/>
+        </svg>
+        <span>Gallery</span>
+        <span class="action-badge hidden" id="galleryBadge">0</span>
+      </button>
+      <button class="action-btn" id="exportBtn" disabled title="Export log" aria-label="Export">
+        <svg viewBox="0 0 24 24" width="15" height="15" stroke="currentColor" stroke-width="2" fill="none">
+          <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/>
+        </svg>
+        <span>Export</span>
+      </button>
+    </div>
+  </div>
+
+</div><!-- .app -->
+
+<!-- ═══════════════════════════════════════════
+  ANALYTICS PANEL (slide-up)
+══════════════════════════════════════════════ -->
+<div class="panel" id="analyticsPanel">
+  <div class="panel-overlay" id="analyticsOverlay"></div>
+  <div class="panel-sheet">
+    <div class="panel-handle"></div>
+    <div class="panel-hdr">
+      <h2 class="panel-title">Analytics</h2>
+      <button class="icon-btn" id="analyticsClose" aria-label="Close">
+        <svg viewBox="0 0 24 24" width="15" height="15" stroke="currentColor" stroke-width="2.5" fill="none">
+          <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+        </svg>
+      </button>
+    </div>
+    <div class="panel-body">
+      <!-- FPS History Graph -->
+      <div class="analytics-section">
+        <p class="analytics-label">FPS HISTORY</p>
+        <canvas class="analytics-chart" id="fpsHistoryChart" height="60"></canvas>
+      </div>
+      <!-- Object Distribution -->
+      <div class="analytics-section">
+        <p class="analytics-label">OBJECT DISTRIBUTION</p>
+        <div class="dist-bars" id="distBars">
+          <span class="analytics-empty">Start camera to see distribution</span>
+        </div>
+      </div>
+      <!-- Detection Feed -->
+      <div class="analytics-section">
+        <p class="analytics-label">DETECTION FEED</p>
+        <div class="det-feed" id="detFeed">
+          <span class="analytics-empty">No detections yet</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════
+  GALLERY PANEL (slide-up)
+══════════════════════════════════════════════ -->
+<div class="panel" id="galleryPanel">
+  <div class="panel-overlay" id="galleryOverlay"></div>
+  <div class="panel-sheet">
+    <div class="panel-handle"></div>
+    <div class="panel-hdr">
+      <h2 class="panel-title">Gallery <span class="panel-count" id="galleryCount">0</span></h2>
+      <div style="display:flex;gap:6px;align-items:center">
+        <button class="text-btn danger" id="clearGalleryBtn">Clear</button>
+        <button class="icon-btn" id="galleryClose" aria-label="Close">
+          <svg viewBox="0 0 24 24" width="15" height="15" stroke="currentColor" stroke-width="2.5" fill="none">
+            <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+    <div class="panel-body">
+      <div class="gallery-grid" id="galleryGrid"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════
+  SETTINGS PANEL (slide-in right)
+══════════════════════════════════════════════ -->
+<div class="panel panel-right" id="settingsPanel">
+  <div class="panel-overlay" id="settingsOverlay"></div>
+  <div class="panel-sheet panel-sheet-right">
+    <div class="panel-hdr">
+      <h2 class="panel-title">Settings</h2>
+      <button class="icon-btn" id="settingsClose" aria-label="Close">
+        <svg viewBox="0 0 24 24" width="15" height="15" stroke="currentColor" stroke-width="2.5" fill="none">
+          <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+        </svg>
+      </button>
+    </div>
+    <div class="panel-body">
+
+      <div class="settings-group">
+        <h3 class="settings-group-title">Detection</h3>
+        <div class="settings-row">
+          <div class="settings-row-label">
+            <span>Confidence</span>
+            <span class="settings-val" id="confVal">55%</span>
+          </div>
+          <input type="range" class="slider" id="confSlider" min="20" max="90" value="55" step="5">
+        </div>
+        <div class="settings-row">
+          <div class="settings-row-label">
+            <span>Max Objects</span>
+            <span class="settings-val" id="maxDetVal">20</span>
+          </div>
+          <input type="range" class="slider" id="maxDetSlider" min="5" max="40" value="20" step="5">
+        </div>
+        <div class="settings-row">
+          <span class="settings-row-label">Model Base</span>
+          <div class="seg-ctrl">
+            <button class="seg-btn active" id="modelLite" data-model="lite_mobilenet_v2">Lite ⚡</button>
+            <button class="seg-btn" id="modelFull" data-model="mobilenet_v1">Full 🎯</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="settings-group">
+        <h3 class="settings-group-title">Display</h3>
+        <div class="settings-row">
+          <span class="settings-row-label">Box Style</span>
+          <div class="seg-ctrl">
+            <button class="seg-btn active" id="styleCorner">Corner</button>
+            <button class="seg-btn" id="styleFull">Full</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="settings-group">
+        <h3 class="settings-group-title">Data &amp; Export</h3>
+        <button class="settings-action" id="exportJsonBtn">
+          <svg viewBox="0 0 24 24" width="13" height="13" stroke="currentColor" stroke-width="2" fill="none">
+            <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
+            <polyline points="14 2 14 8 20 8"/>
+            <line x1="16" y1="13" x2="8" y2="13"/>
+            <line x1="16" y1="17" x2="8" y2="17"/>
+          </svg>
+          Export Detection Log (JSON)
+        </button>
+        <button class="settings-action danger" id="clearDataBtn">
+          <svg viewBox="0 0 24 24" width="13" height="13" stroke="currentColor" stroke-width="2" fill="none">
+            <polyline points="3 6 5 6 21 6"/>
+            <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/>
+            <path d="M10 11v6M14 11v6"/>
+          </svg>
+          Clear All Data &amp; Gallery
+        </button>
+      </div>
+
+      <div class="settings-group">
+        <h3 class="settings-group-title">About</h3>
+        <div class="about-grid">
+          <div class="about-row"><span>Model</span><span>COCO-SSD</span></div>
+          <div class="about-row"><span>Runtime</span><span>TensorFlow.js</span></div>
+          <div class="about-row"><span>Categories</span><span>80 classes</span></div>
+          <div class="about-row"><span>Gallery Limit</span><span>30 snaps</span></div>
+          <div class="about-row"><span>Version</span><span>2.0.0</span></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<script src="script.js"></script>
+</body>
+</html>
